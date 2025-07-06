@@ -1,24 +1,19 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydub import AudioSegment
+from fastapi.responses import JSONResponse, FileResponse
 import os
 import uuid
+from pydub import AudioSegment
 import speech_recognition as sr
-from gtts import gTTS
 from googletrans import Translator
-from fastapi.staticfiles import StaticFiles
-
-
-
+import tempfile
 
 app = FastAPI()
 
-
-# Habilitar CORS para frontend en localhost:3000
+# Permitir solicitudes desde tu frontend en Vercel
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["https://voice-translator-project.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
