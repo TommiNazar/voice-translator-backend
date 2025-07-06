@@ -8,9 +8,11 @@ import speech_recognition as sr
 from googletrans import Translator
 import tempfile
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
 
-# Permitir solicitudes desde tu frontend en Vercel
+# Permitir solicitudes desde Vercel
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://voice-translator-project.vercel.app"],
@@ -18,7 +20,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
