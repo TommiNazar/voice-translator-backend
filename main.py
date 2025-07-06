@@ -1,30 +1,33 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
 import os
 import uuid
 from pydub import AudioSegment
 import speech_recognition as sr
 from googletrans import Translator
-import tempfile
-
-from fastapi.middleware.cors import CORSMiddleware
+from gtts import gTTS
 
 app = FastAPI()
 
-# Permitir solicitudes desde Vercel
+# ✅ Permitir peticiones desde Vercel y desarrollo local
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://voice-translator-project.vercel.app"],
+    allow_origins=[
+        "https://voice-translator-project.vercel.app",  # producción
+        "http://localhost:3000"  # desarrollo local
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ✅ Montar carpeta estática para servir los audios traducidos
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-
-# Carpeta para guardar archivos temporales
+# ✅ Crear carpeta "static" si no existe
 os.makedirs("static", exist_ok=True)
 
 @app.post("/translate")
@@ -32,53 +35,54 @@ async def translate_audio(
     audio: UploadFile = File(...),
     target_language: str = Form(...)
 ):
-    # Guardar el archivo recibido
-    audio_id = str(uuid.uuid4())
-    audio_path = f"static/{audio_id}.webm"
-    with open(audio_path, "wb") as f:
-        f.write(await audio.read())
-
-    # Convertir de .webm a .wav usando pydub (requiere ffmpeg instalado)
     try:
-        sound = AudioSegment.from_file(audio_path)
+        # ✅ Guardar archivo original
+        audio_id = str(uuid.uuid4())
+        webm_path = f"static/{audio_id}.webm"
+        with open(webm_path, "wb") as f:
+            f.write(await audio.read())
+
+        # ✅ Convertir a .wav
         wav_path = f"static/{audio_id}.wav"
+        sound = AudioSegment.from_file(webm_path)
         sound.export(wav_path, format="wav")
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Error al convertir el audio", "detail": str(e)}
-        )
 
-    # Transcripción
-    recognizer = sr.Recognizer()
-    transcription = ""
-    try:
+        # ✅ Transcribir con SpeechRecognition
+        recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
-            transcription = recognizer.recognize_google(audio_data, language="es-AR")
-    except Exception as e:
-        transcription = "No se pudo transcribir"
+            try:
+                transcription = recognizer.recognize_google(audio_data, language="es-AR")
+            except Exception:
+                transcription = "No se pudo transcribir"
 
-    # Traducción
-    translator = Translator()
-    try:
-        translation = translator.translate(transcription, dest=target_language).text
-    except Exception as e:
-        translation = "No se pudo traducir"
+        # ✅ Traducir con Google Translate
+        translator = Translator()
+        try:
+            translation = translator.translate(transcription, dest=target_language).text
+        except Exception:
+            translation = "No se pudo traducir"
 
-    # Texto traducido a voz (audio)
-    try:
-        tts = gTTS(translation, lang=target_language)
-        translated_audio_path = f"static/audio_traducido_{audio_id}.mp3"
-        tts.save(translated_audio_path)
-        audio_url = f"http://localhost:8000/{translated_audio_path}"
-    except Exception as e:
-        audio_url = None
+        # ✅ Generar audio traducido
+        try:
+            tts = gTTS(translation, lang=target_language)
+            translated_audio_filename = f"audio_traducido_{audio_id}.mp3"
+            translated_audio_path = f"static/{translated_audio_filename}"
+            tts.save(translated_audio_path)
 
-    return JSONResponse(
-        content={
+            # ✅ Ruta pública en Render (ajustar si cambia tu URL de backend)
+            audio_url = f"https://voice-translator-backend-1n3i.onrender.com/static/{translated_audio_filename}"
+        except Exception:
+            audio_url = None
+
+        return JSONResponse(content={
             "transcription": transcription,
             "translation": translation,
-            "audio_url": audio_url,
-        }
-    )
+            "audio_url": audio_url
+        })
+
+    except Exception as e:
+        return JSONResponse(status_code=500, content={
+            "error": "Ocurrió un error interno en el servidor",
+            "detail": str(e)
+        })
