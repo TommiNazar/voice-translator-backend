@@ -10,28 +10,22 @@ import speech_recognition as sr
 from googletrans import Translator
 from gtts import gTTS
 
-from fastapi.middleware.cors import CORSMiddleware
-
 app = FastAPI()
 
-# ✅ Habilitar CORS para Vercel
+# ✅ CORS FIX
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://voice-translator-project.vercel.app",  # ← MUY IMPORTANTE
-        "http://localhost:3000",                        # para pruebas locales
+        "https://voice-translator-project.vercel.app",
+        "http://localhost:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-
-# ✅ Montar carpeta estática para servir los audios traducidos
+# ✅ Carpeta para audios
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# ✅ Crear carpeta "static" si no existe
 os.makedirs("static", exist_ok=True)
 
 @app.post("/translate")
@@ -40,18 +34,17 @@ async def translate_audio(
     target_language: str = Form(...)
 ):
     try:
-        # ✅ Guardar archivo original
         audio_id = str(uuid.uuid4())
         webm_path = f"static/{audio_id}.webm"
         with open(webm_path, "wb") as f:
             f.write(await audio.read())
 
-        # ✅ Convertir a .wav
+        # Convertir .webm a .wav
         wav_path = f"static/{audio_id}.wav"
         sound = AudioSegment.from_file(webm_path)
         sound.export(wav_path, format="wav")
 
-        # ✅ Transcribir con SpeechRecognition
+        # Transcribir
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
@@ -60,21 +53,20 @@ async def translate_audio(
             except Exception:
                 transcription = "No se pudo transcribir"
 
-        # ✅ Traducir con Google Translate
+        # Traducir
         translator = Translator()
         try:
             translation = translator.translate(transcription, dest=target_language).text
         except Exception:
             translation = "No se pudo traducir"
 
-        # ✅ Generar audio traducido
+        # Convertir texto traducido a audio
         try:
             tts = gTTS(translation, lang=target_language)
             translated_audio_filename = f"audio_traducido_{audio_id}.mp3"
             translated_audio_path = f"static/{translated_audio_filename}"
             tts.save(translated_audio_path)
 
-            # ✅ Ruta pública en Render (ajustar si cambia tu URL de backend)
             audio_url = f"https://voice-translator-backend-1n3i.onrender.com/static/{translated_audio_filename}"
         except Exception:
             audio_url = None
