@@ -10,19 +10,22 @@ import speech_recognition as sr
 from googletrans import Translator
 from gtts import gTTS
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI()
 
-# ✅ Permitir peticiones desde Vercel y desarrollo local
+# ✅ Habilitar CORS para Vercel
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://voice-translator-project.vercel.app",
-        "http://localhost:3000"
+        "https://voice-translator-project.vercel.app",  # ← MUY IMPORTANTE
+        "http://localhost:3000",                        # para pruebas locales
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # ✅ Montar carpeta estática para servir los audios traducidos
