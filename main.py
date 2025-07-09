@@ -1,32 +1,14 @@
 from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-
+from fastapi.responses import Response
+import json
 import os
 import uuid
-from pydub import AudioSegment
-import speech_recognition as sr
-from googletrans import Translator
-from gtts import gTTS
+import shutil
+from utils.transcription import transcribe_audio
+from utils.translation import translate_text
+from utils.text_to_speech import text_to_speech
 
 app = FastAPI()
-
-# ✅ Middleware CORS (a veces Render lo ignora, por eso también lo forzamos)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://voice-translator-project.vercel.app",
-        "http://localhost:3000"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ✅ Servir archivos estáticos
-app.mount("/static", StaticFiles(directory="static"), name="static")
-os.makedirs("static", exist_ok=True)
 
 @app.post("/translate")
 async def translate_audio(
@@ -34,57 +16,47 @@ async def translate_audio(
     target_language: str = Form(...)
 ):
     try:
-        # Guardar archivo original
+        # Guardar el archivo de audio en el sistema de archivos
         audio_id = str(uuid.uuid4())
-        webm_path = f"static/{audio_id}.webm"
-        with open(webm_path, "wb") as f:
-            f.write(await audio.read())
+        audio_path = f"temp_{audio_id}.webm"
 
-        # Convertir a WAV
-        wav_path = f"static/{audio_id}.wav"
-        sound = AudioSegment.from_file(webm_path)
-        sound.export(wav_path, format="wav")
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
 
-        # Transcribir con SpeechRecognition
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(wav_path) as source:
-            audio_data = recognizer.record(source)
-            try:
-                transcription = recognizer.recognize_google(audio_data, language="es-AR")
-            except Exception:
-                transcription = "No se pudo transcribir"
+        # Transcribir el audio
+        transcription = transcribe_audio(audio_path)
 
-        # Traducir con Google Translate
-        translator = Translator()
-        try:
-            translation = translator.translate(transcription, dest=target_language).text
-        except Exception:
-            translation = "No se pudo traducir"
+        # Traducir el texto transcripto
+        translation = translate_text(transcription, target_language)
 
-        # Generar audio traducido
-        try:
-            tts = gTTS(translation, lang=target_language)
-            translated_audio_filename = f"audio_traducido_{audio_id}.mp3"
-            translated_audio_path = f"static/{translated_audio_filename}"
-            tts.save(translated_audio_path)
+        # Convertir texto traducido a voz
+        translated_audio_path = text_to_speech(translation, target_language)
 
-            audio_url = f"https://voice-translator-backend-1n3i.onrender.com/static/{translated_audio_filename}"
-        except Exception:
-            audio_url = None
+        # Simular URL pública (en producción deberías subirlo a un storage real)
+        audio_url = f"https://voice-translator-backend-1n3i.onrender.com/{translated_audio_path}"
 
-        # ✅ Forzar encabezado CORS manualmente
-        response = JSONResponse(content={
-            "transcription": transcription,
-            "translation": translation,
-            "audio_url": audio_url
-        })
-        response.headers["Access-Control-Allow-Origin"] = "https://voice-translator-project.vercel.app"
-        return response
+        # CORS: devolvemos con encabezados manuales
+        headers = {"Access-Control-Allow-Origin": "https://voice-translator-project.vercel.app"}
+
+        return Response(
+            content=json.dumps({
+                "transcription": transcription,
+                "translation": translation,
+                "audio_url": audio_url
+            }),
+            media_type="application/json",
+            headers=headers
+        )
 
     except Exception as e:
-        response = JSONResponse(status_code=500, content={
-            "error": "Ocurrió un error interno en el servidor",
-            "detail": str(e)
-        })
-        response.headers["Access-Control-Allow-Origin"] = "https://voice-translator-project.vercel.app"
-        return response
+        headers = {"Access-Control-Allow-Origin": "https://voice-translator-project.vercel.app"}
+
+        return Response(
+            content=json.dumps({
+                "error": "Ocurrió un error interno en el servidor",
+                "detail": str(e)
+            }),
+            media_type="application/json",
+            status_code=500,
+            headers=headers
+        )
