@@ -1,31 +1,59 @@
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from voice_translator import translate_audio
-import uvicorn
+from pydub import AudioSegment
+import os
+import uuid
+from utils.translator import transcribe_audio, translate_text, text_to_speech
 
 app = FastAPI()
 
-# Permitir acceso desde tu frontend en Vercel
+# CORS para Vercel + local
 origins = [
-    "https://voice-translator-project.vercel.app",  # tu frontend en Vercel
+    "http://localhost:3000",
+    "https://voice-translator-project.vercel.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Asegura que solo este origen tenga acceso
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+UPLOAD_DIR = "static/audio"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 @app.post("/translate")
-async def translate(audio: UploadFile = File(...), target_language: str = Form(...)):
+async def translate_audio(audio: UploadFile = File(...), target_language: str = Form(...)):
     try:
-        translated_text, translated_audio_path = await translate_audio(audio, target_language)
-        return {"text": translated_text, "audio_url": translated_audio_path}
+        # Guardar el archivo temporal
+        file_id = str(uuid.uuid4())
+        audio_path = os.path.join(UPLOAD_DIR, f"{file_id}.webm")
+
+        with open(audio_path, "wb") as f:
+            f.write(await audio.read())
+
+        # Convertir de .webm a .wav
+        sound = AudioSegment.from_file(audio_path)
+        wav_path = os.path.join(UPLOAD_DIR, f"{file_id}.wav")
+        sound.export(wav_path, format="wav")
+
+        # Transcripción y traducción
+        text = transcribe_audio(wav_path)
+        translated_text = translate_text(text, target_language)
+        translated_audio_path = text_to_speech(translated_text, target_language)
+
+        return {
+            "original_text": text,
+            "translated_text": translated_text,
+            "translated_audio_url": f"/static/audio/{os.path.basename(translated_audio_path)}"
+        }
+
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+@app.get("/")
+def root():
+    return {"message": "Backend operativo 🎙️"}
